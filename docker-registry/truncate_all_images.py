@@ -11,11 +11,11 @@ def get_arguments():
   """
 
   parser = ArgumentParser(description="Truncates image tags in a container registry.")
-  parser.add_argument('--registry', type=str, required=True,
+  parser.add_argument('--registry', type=str, required=False,
                       help="The URL of the container registry.")
-  parser.add_argument('--username', type=str, required=True,
+  parser.add_argument('--username', type=str, required=False,
                       help="The username for authentication with the registry.")
-  parser.add_argument('--password', type=str, required=True,
+  parser.add_argument('--password', type=str, required=False,
                       help="The password for authentication with the registry.")
   parser.add_argument('--keep', type=int, default=4,
                       help="The number of tags to keep for each image (default: 4).")
