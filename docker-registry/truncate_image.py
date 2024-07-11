@@ -50,6 +50,9 @@ def manage_image_tags(registry_url: str, repository: str, username: str, passwor
 
   auth = (username, password)
   tags = get_image_tags(registry_url, repository, auth)
+  # safeguard against empty tags list
+  if tags is None:
+    return
   
   # Filter out non-version tags if needed (e.g., "latest")
   version_tags = [tag for tag in tags if semver.Version.is_valid(tag)]
