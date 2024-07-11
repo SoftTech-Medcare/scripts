@@ -41,8 +41,7 @@ def manage_image_tags(registry_url: str, repository: str, username: str, passwor
   """
 
   try:
-    import semver
-    semver.require('=3.0.2')
+    import semver # require version 3
   except ImportError:
     raise ImportError("The 'semver' library is required for version tag management. Please install it using 'pip install semver'.")
 
