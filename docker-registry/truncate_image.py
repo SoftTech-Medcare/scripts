@@ -42,6 +42,7 @@ def manage_image_tags(registry_url: str, repository: str, username: str, passwor
 
   try:
     import semver
+    semver.require('=3.0.2')
   except ImportError:
     raise ImportError("The 'semver' library is required for version tag management. Please install it using 'pip install semver'.")
 
@@ -52,10 +53,10 @@ def manage_image_tags(registry_url: str, repository: str, username: str, passwor
   tags = get_image_tags(registry_url, repository, auth)
   
   # Filter out non-version tags if needed (e.g., "latest")
-  version_tags = [tag for tag in tags if semver.VersionInfo.isvalid(tag)]
+  version_tags = [tag for tag in tags if semver.Version.is_valid(tag)]
   
   if len(version_tags) > keep:
-    version_tags_sorted = sorted(version_tags, key=semver.VersionInfo.parse)
+    version_tags_sorted = sorted(version_tags, key=semver.Version.parse)
     tags_to_delete = version_tags_sorted[:-4]
     for tag in tags_to_delete:
       delete_tag(registry_url, repository, auth, tag)
