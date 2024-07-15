@@ -1,0 +1,17 @@
+# Use an official Python runtime as a parent image
+FROM python:3.9-slim
+
+# Set the working directory in the container
+WORKDIR /usr/src/app
+
+# Copy the requirements file into the container
+COPY requirements-kube.txt ./
+
+# Install the required packages
+RUN pip install --no-cache-dir -r requirements-kube.txt
+
+# Copy the rest of the application code into the container
+COPY init-database-and-user-kube-admin.py ./
+
+# Run the Python script
+CMD ["python", "./init-database-and-user-kube-admin.py"]
