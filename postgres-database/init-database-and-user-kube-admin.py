@@ -78,7 +78,8 @@ def create_postgres_user_schema_and_database():
             cursor.execute(sql.SQL("CREATE USER {} WITH PASSWORD %s").format(sql.Identifier(USER)), (USER_PASSWORD,))
             print(f"User '{USER}' created successfully.")
         else:
-            print(f"User '{USER}' already exists.")
+            print(f"User '{USER}' already exists. update password if needed.")
+            cursor.execute(sql.SQL("ALTER USER {} WITH PASSWORD %s").format(sql.Identifier(USER)), (USER_PASSWORD,))
 
         # Check if database exists, create if not
         if not check_database_exists(cursor, DATABASE):
