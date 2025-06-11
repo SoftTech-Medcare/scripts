@@ -4,6 +4,8 @@ try:
 except ImportError:
   raise ImportError("The 'requests' library is required for making HTTP requests. Please install it using 'pip install requests")
 
+import json
+from datetime import datetime
 from argparse import ArgumentParser
 
 def get_image_tags(registry_url, repository, auth):
@@ -11,6 +13,32 @@ def get_image_tags(registry_url, repository, auth):
   response.raise_for_status()
   tags = response.json().get('tags', [])
   return tags
+
+def get_tag_created_date(registry_url, repository, auth, tag):
+  """Get the creation date of a tag from its manifest"""
+  try:
+    # Get manifest
+    response = requests.get(f"{registry_url}/v2/{repository}/manifests/{tag}", 
+                          auth=auth, 
+                          headers={'Accept': 'application/vnd.docker.distribution.manifest.v2+json'})
+    response.raise_for_status()
+    manifest = response.json()
+    
+    # Get config blob
+    config_digest = manifest['config']['digest']
+    response = requests.get(f"{registry_url}/v2/{repository}/blobs/{config_digest}", auth=auth)
+    response.raise_for_status()
+    config = response.json()
+    
+    # Extract creation date
+    created_str = config.get('created', '')
+    if created_str:
+      return datetime.fromisoformat(created_str.replace('Z', '+00:00'))
+    else:
+      return datetime.min
+  except Exception as e:
+    print(f"Warning: Could not get creation date for {tag}: {e}")
+    return datetime.min
 
 def delete_tag(registry_url, repository, auth, tag):
   response = requests.head(f"{registry_url}/v2/{repository}/manifests/{tag}", auth=auth, headers={'Accept': 'application/vnd.docker.distribution.manifest.v2+json'})
@@ -68,41 +96,71 @@ def manage_image_tags(registry_url: str, repository: str, username: str, passwor
         else:
             stable_tags.append((v, tag))
 
-    # Sort both lists by version (oldest to newest)
-    stable_tags.sort(key=lambda x: x[0])
-    prerelease_tags.sort(key=lambda x: x[0])
+    # Group tags by semver version and sort by creation date within groups
+    def sort_tags_with_dates(tag_list):
+        if not tag_list:
+            return []
+        
+        # Group by semver version
+        version_groups = {}
+        for version, tag in tag_list:
+            version_key = str(version)
+            if version_key not in version_groups:
+                version_groups[version_key] = []
+            version_groups[version_key].append((version, tag))
+        
+        # For each group with multiple tags, sort by creation date
+        sorted_tags = []
+        for version_key, group in version_groups.items():
+            if len(group) > 1:
+                # Multiple tags with same semver - sort by creation date
+                print(f"Sorting {len(group)} tags with version {version_key} by creation date...")
+                group_with_dates = []
+                for version, tag in group:
+                    created_date = get_tag_created_date(registry_url, repository, auth, tag)
+                    group_with_dates.append((version, tag, created_date))
+                # Sort by creation date (oldest first)
+                group_with_dates.sort(key=lambda x: x[2])
+                sorted_tags.extend([(v, t) for v, t, d in group_with_dates])
+            else:
+                sorted_tags.extend(group)
+        
+        # Sort all groups by semver version
+        sorted_tags.sort(key=lambda x: x[0])
+        return sorted_tags
 
-    # Always keep at least 1 latest stable version
-    stables_to_keep = stable_tags[-keep:] if len(stable_tags) >= keep else stable_tags[:]
+    # Sort both lists by version, using creation dates for identical versions
+    stable_tags = sort_tags_with_dates(stable_tags)
+    prerelease_tags = sort_tags_with_dates(prerelease_tags)
+
+    # Start with empty keep lists
+    tags_to_keep = set()
+    
+    # Always keep at least 1 latest stable version if available
     if stable_tags:
         latest_stable = stable_tags[-1]
-        if latest_stable not in stables_to_keep:
-            stables_to_keep.append(latest_stable)
-    stables_to_keep_tags = set(tag for v, tag in stables_to_keep)
-
-    # Always keep at least 1 latest pre-release if it's newer than the latest stable
-    prereleases_to_keep = []
+        tags_to_keep.add(latest_stable[1])
+    
+    # Always keep at least 1 latest pre-release if it's newer than latest stable
     if prerelease_tags:
         latest_prerelease = prerelease_tags[-1]
         if not stable_tags or latest_prerelease[0] > stable_tags[-1][0]:
-            prereleases_to_keep.append(latest_prerelease)
-    # Also keep pre-releases newer than the oldest kept stable
-    if stables_to_keep:
-        oldest_kept_stable = stables_to_keep[0][0]
-        prereleases_to_keep += [(v, tag) for v, tag in prerelease_tags if v > oldest_kept_stable and (v, tag) not in prereleases_to_keep]
-    else:
-        # If no stables, keep the latest 'keep' pre-releases
-        prereleases_to_keep += prerelease_tags[-keep:]
-    prereleases_to_keep_tags = set(tag for v, tag in prereleases_to_keep)
-
-    # Tags to keep
-    tags_to_keep = stables_to_keep_tags | prereleases_to_keep_tags
+            tags_to_keep.add(latest_prerelease[1])
+    
+    # Fill remaining slots up to 'keep' with the newest versions (stable + pre-release combined)
+    all_versions = stable_tags + prerelease_tags
+    all_versions.sort(key=lambda x: x[0], reverse=True)  # Sort newest first
+    
+    for version, tag in all_versions:
+        if len(tags_to_keep) >= keep:
+            break
+        tags_to_keep.add(tag)
 
     # Tags to delete: all version tags not in tags_to_keep
     tags_to_delete = [tag for tag in version_tags if tag not in tags_to_keep]
 
     if tags_to_delete:
-        print(f"Deleting {len(tags_to_delete)} tags (prioritizing pre-releases if needed)...")
+        print(f"Deleting {len(tags_to_delete)} tags...")
         for tag in tags_to_delete:
             delete_tag(registry_url, repository, auth, tag)
     else:
