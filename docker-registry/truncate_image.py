@@ -41,14 +41,37 @@ def get_tag_created_date(registry_url, repository, auth, tag):
     return datetime.min
 
 def delete_tag(registry_url, repository, auth, tag):
-  response = requests.head(f"{registry_url}/v2/{repository}/manifests/{tag}", auth=auth, headers={'Accept': 'application/vnd.docker.distribution.manifest.v2+json'})
-  response.raise_for_status()
-  digest = response.headers['Docker-Content-Digest']
-  response = requests.delete(f"{registry_url}/v2/{repository}/manifests/{digest}", auth=auth)
-  if response.status_code == 202:
-    print(f"Deleted tag: {tag}")
-  else:
-    print(f"Failed to delete tag: {tag}, status code: {response.status_code}")
+  try:
+    # First, get the manifest digest
+    response = requests.head(f"{registry_url}/v2/{repository}/manifests/{tag}", 
+                           auth=auth, 
+                           headers={'Accept': 'application/vnd.docker.distribution.manifest.v2+json'})
+    response.raise_for_status()
+    
+    digest = response.headers.get('Docker-Content-Digest')
+    if not digest:
+      print(f"Warning: No digest found for tag {tag}, skipping deletion")
+      return
+    
+    # Now delete the manifest using the digest
+    response = requests.delete(f"{registry_url}/v2/{repository}/manifests/{digest}", auth=auth)
+    
+    if response.status_code == 202:
+      print(f"Deleted tag: {tag}")
+    elif response.status_code == 404:
+      print(f"Tag {tag} already deleted or does not exist")
+    else:
+      print(f"Failed to delete tag: {tag}, status code: {response.status_code}")
+      if response.text:
+        print(f"Response: {response.text}")
+        
+  except requests.exceptions.HTTPError as e:
+    if e.response.status_code == 404:
+      print(f"Tag {tag} not found (404), may have been already deleted")
+    else:
+      print(f"HTTP error deleting tag {tag}: {e}")
+  except Exception as e:
+    print(f"Error deleting tag {tag}: {e}")
 
 def manage_image_tags(registry_url: str, repository: str, username: str, password: str, keep=4):
     """
