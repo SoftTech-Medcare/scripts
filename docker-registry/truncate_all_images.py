@@ -1,6 +1,7 @@
 from argparse import ArgumentParser
 import requests
 import os
+import sys
 from truncate_image import manage_image_tags
 
 def get_arguments():
@@ -59,7 +60,18 @@ if __name__ == "__main__":
   registry = args.registry or os.getenv('DOCKER_REGISTRY')
   username = args.username or os.getenv('DOCKER_USERNAME')
   password = args.password or os.getenv('DOCKER_PASSWORD')
-  keep = args.keep or os.getenv("KEEP_TAGS", 4)
+  # Check if --keep was explicitly provided in command line
+  keep_provided = '--keep' in sys.argv
+  if keep_provided:
+    # Command-line argument takes precedence
+    keep = args.keep
+  else:
+    # Use environment variable if available, otherwise use default
+    keep_env = os.getenv("KEEP_TAGS")
+    if keep_env is not None:
+      keep = int(keep_env)
+    else:
+      keep = args.keep  # This will be the default 4
 
   # Check for missing required arguments (after trying environment variables)
   missing_args = []
@@ -74,4 +86,4 @@ if __name__ == "__main__":
     print(f"Error: Missing required arguments: {', '.join(missing_args)}")
     exit(1)
 
-  truncate_all_images(registry, username, password, args.keep)
+  truncate_all_images(registry, username, password, keep)

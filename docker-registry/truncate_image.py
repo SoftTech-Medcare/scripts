@@ -1,4 +1,5 @@
 import os
+import sys
 try:
   import requests
 except ImportError:
@@ -203,7 +204,18 @@ if __name__ == "__main__":
   repository = args.repository or os.getenv('DOCKER_REPOSITORY') # the image repository name
   username = args.username or os.getenv('DOCKER_USERNAME')
   password = args.password or os.getenv('DOCKER_PASSWORD')
-  keep = args.keep or os.getenv("KEEP_TAGS", 4)
+  # Check if --keep was explicitly provided in command line
+  keep_provided = '--keep' in sys.argv
+  if keep_provided:
+    # Command-line argument takes precedence
+    keep = args.keep
+  else:
+    # Use environment variable if available, otherwise use default
+    keep_env = os.getenv("KEEP_TAGS")
+    if keep_env is not None:
+      keep = int(keep_env)
+    else:
+      keep = args.keep  # This will be the default 4
 
   # Check for missing required arguments (after trying environment variables)
   missing_args = []
