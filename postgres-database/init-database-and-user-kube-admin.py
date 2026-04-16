@@ -22,10 +22,10 @@ DB_PORT = os.getenv('DB_PORT', '5432')
 DB_NAME = os.getenv('DB_NAME', 'postgres')
 DB_USER = os.getenv('DB_USER', 'postgres')
 
-# New user, schema, and database parameters
+# New user and database parameters
 USER = os.getenv('USER')
 USER_PASSWORD = os.getenv('USER_PASSWORD')
-SCHEMA = os.getenv('SCHEMA')
+SCHEMA = (os.getenv('SCHEMA') or '').strip()
 DATABASE = os.getenv('DATABASE')
 
 def check_user_exists(cursor: cursor, user):
@@ -101,26 +101,86 @@ def create_postgres_user_schema_and_database():
         conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
         cursor = conn.cursor()
 
-        # Check if schema exists, create if not
-        cursor.execute("SELECT schema_name FROM information_schema.schemata WHERE schema_name=%s", (SCHEMA,))
-        if cursor.fetchone() is None:
-            cursor.execute(sql.SQL("CREATE SCHEMA {} AUTHORIZATION {}").format(sql.Identifier(SCHEMA), sql.Identifier(USER)))
-            cursor.execute(sql.SQL("ALTER USER {} IN DATABASE {} SET search_path TO {}").format(sql.Identifier(USER), sql.Identifier(DATABASE), sql.Identifier(SCHEMA)))
-            print(f"Schema '{SCHEMA}' created for user '{USER}'.")
+        # Always grant database privileges.
+        cursor.execute(
+            sql.SQL("GRANT ALL PRIVILEGES ON DATABASE {} TO {}").format(
+                sql.Identifier(DATABASE),
+                sql.Identifier(USER),
+            )
+        )
 
-            # Grant all privileges to the user on the new database and schema
-            cursor.execute(sql.SQL("GRANT ALL PRIVILEGES ON DATABASE {} TO {}").format(sql.Identifier(DATABASE), sql.Identifier(USER)))
-            cursor.execute(sql.SQL("GRANT ALL PRIVILEGES ON SCHEMA {} TO {}").format(sql.Identifier(SCHEMA), sql.Identifier(USER)))
-            cursor.execute(sql.SQL("GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA {} TO {}").format(sql.Identifier(SCHEMA), sql.Identifier(USER)))
-            cursor.execute(sql.SQL("GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA {} TO {}").format(sql.Identifier(SCHEMA), sql.Identifier(USER)))
-            print(f"Granted all privileges on database '{DATABASE}' and schema '{SCHEMA}' to user '{USER}'.")
+        # Use default schema behavior when SCHEMA is not specified (or explicitly set to public).
+        use_public_schema = (not SCHEMA) or SCHEMA.lower() == 'public'
+        target_schema = 'public' if use_public_schema else SCHEMA
+
+        if use_public_schema:
+            # Keep schema-less mode: use PostgreSQL default public schema.
+            cursor.execute(
+                sql.SQL("ALTER USER {} IN DATABASE {} SET search_path TO public").format(
+                    sql.Identifier(USER),
+                    sql.Identifier(DATABASE),
+                )
+            )
+            cursor.execute(
+                sql.SQL("GRANT USAGE, CREATE ON SCHEMA public TO {}").format(
+                    sql.Identifier(USER)
+                )
+            )
+            cursor.execute(
+                sql.SQL("GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO {}").format(
+                    sql.Identifier(USER)
+                )
+            )
+            cursor.execute(
+                sql.SQL("GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO {}").format(
+                    sql.Identifier(USER)
+                )
+            )
+            print(f"Using default schema 'public' for user '{USER}'.")
         else:
-            print(f"Schema '{SCHEMA}' already exists.")
+            # Backward-compatible path for custom schema deployments.
+            if not check_schema_exists(cursor, target_schema):
+                cursor.execute(
+                    sql.SQL("CREATE SCHEMA {} AUTHORIZATION {}").format(
+                        sql.Identifier(target_schema),
+                        sql.Identifier(USER),
+                    )
+                )
+                print(f"Schema '{target_schema}' created for user '{USER}'.")
+            else:
+                print(f"Schema '{target_schema}' already exists.")
+
+            cursor.execute(
+                sql.SQL("ALTER USER {} IN DATABASE {} SET search_path TO {}").format(
+                    sql.Identifier(USER),
+                    sql.Identifier(DATABASE),
+                    sql.Identifier(target_schema),
+                )
+            )
+            cursor.execute(
+                sql.SQL("GRANT ALL PRIVILEGES ON SCHEMA {} TO {}").format(
+                    sql.Identifier(target_schema),
+                    sql.Identifier(USER),
+                )
+            )
+            cursor.execute(
+                sql.SQL("GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA {} TO {}").format(
+                    sql.Identifier(target_schema),
+                    sql.Identifier(USER),
+                )
+            )
+            cursor.execute(
+                sql.SQL("GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA {} TO {}").format(
+                    sql.Identifier(target_schema),
+                    sql.Identifier(USER),
+                )
+            )
+            print(f"Granted all privileges on database '{DATABASE}' and schema '{target_schema}' to user '{USER}'.")
             
         # Commit changes
         conn.commit()
 
-        print("User, schema, and database creation/check completed successfully.")
+        print("User and database initialization completed successfully.")
 
     except psycopg2.Error as e:
         print(f"Error: {e}")
