@@ -5,6 +5,7 @@ import json
 SEQ_URL = os.environ.get('SEQ_URL')
 ADMIN_API_KEY = os.environ.get('ADMIN_API_KEY')
 CUSTOMER_NAME = (os.environ.get('CUSTOMER_NAME') or '').strip()
+POOL = (os.environ.get('POOL') or '').strip()
 
 def get_services():
     with open('/app/services.txt', 'r') as f:
@@ -20,6 +21,13 @@ def build_title(service):
         return f"{CUSTOMER_NAME} - {service}"
     return service
 
+def resolve_app_and_pool(service):
+    # Keep behavior explicit: App always equals service from services.txt.
+    # Optional POOL env adds a Pool property; no inferred parsing/fallback.
+    if POOL:
+        return service, POOL
+    return service, None
+
 def get_all_keys():
     response = requests.get(f"{SEQ_URL}/api/apikeys/", headers={"X-Seq-ApiKey": ADMIN_API_KEY})
     return response.json()
@@ -29,7 +37,10 @@ def create_or_update_key(service, token):
     title = build_title(service)
     existing_key = next((key for key in all_keys if key['Title'] == title), None)
 
-    applied_properties = [{"Name": "App", "Value": service}]
+    app, pool = resolve_app_and_pool(service)
+    applied_properties = [{"Name": "App", "Value": app}]
+    if pool:
+        applied_properties.append({"Name": "Pool", "Value": pool})
     if CUSTOMER_NAME:
         applied_properties.append({"Name": "Customer", "Value": CUSTOMER_NAME})
 
