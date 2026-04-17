@@ -4,16 +4,21 @@ import json
 
 SEQ_URL = os.environ.get('SEQ_URL')
 ADMIN_API_KEY = os.environ.get('ADMIN_API_KEY')
-CUSTOMER_NAME = os.environ.get('CUSTOMER_NAME')
+CUSTOMER_NAME = (os.environ.get('CUSTOMER_NAME') or '').strip()
 
 def get_services():
     with open('/app/services.txt', 'r') as f:
         services = {}
         for line in f:
             if line.strip():
-                service, token = line.strip().split(',')
+                service, token = line.strip().split(',', 1)
                 services[service] = token
     return services
+
+def build_title(service):
+    if CUSTOMER_NAME:
+        return f"{CUSTOMER_NAME} - {service}"
+    return service
 
 def get_all_keys():
     response = requests.get(f"{SEQ_URL}/api/apikeys/", headers={"X-Seq-ApiKey": ADMIN_API_KEY})
@@ -21,17 +26,19 @@ def get_all_keys():
 
 def create_or_update_key(service, token):
     all_keys = get_all_keys()
-    existing_key = next((key for key in all_keys if key['Title'] == f"{CUSTOMER_NAME} - {service}"), None)
+    title = build_title(service)
+    existing_key = next((key for key in all_keys if key['Title'] == title), None)
+
+    applied_properties = [{"Name": "App", "Value": service}]
+    if CUSTOMER_NAME:
+        applied_properties.append({"Name": "Customer", "Value": CUSTOMER_NAME})
 
     key_data = {
-        "Title": f"{CUSTOMER_NAME} - {service}",
+        "Title": title,
         "Token": token,
         "TokenPrefix": None,
         "InputSettings": {
-            "AppliedProperties": [
-                {"Name": "App", "Value": service},
-                {"Name": "Customer", "Value": CUSTOMER_NAME}
-            ],
+            "AppliedProperties": applied_properties,
             "Filter": None,
             "MinimumLevel": None,
             "UseServerTimestamps": False
