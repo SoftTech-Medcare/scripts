@@ -4,6 +4,7 @@ import json
 
 SEQ_URL = os.environ.get('SEQ_URL')
 ADMIN_API_KEY = os.environ.get('ADMIN_API_KEY')
+CLUSTER_NAME = (os.environ.get('CLUSTER_NAME') or '').strip()
 CUSTOMER_NAME = (os.environ.get('CUSTOMER_NAME') or '').strip()
 POOL = (os.environ.get('POOL') or '').strip()
 
@@ -17,6 +18,10 @@ def get_services():
     return services
 
 def build_title(service):
+    if CLUSTER_NAME and CUSTOMER_NAME:
+        return f"{CLUSTER_NAME}/{CUSTOMER_NAME} - {service}"
+    if CLUSTER_NAME:
+        return f"{CLUSTER_NAME} - {service}"
     if CUSTOMER_NAME:
         return f"{CUSTOMER_NAME} - {service}"
     return service
@@ -30,17 +35,35 @@ def resolve_app_and_pool(service):
 
 def get_all_keys():
     response = requests.get(f"{SEQ_URL}/api/apikeys/", headers={"X-Seq-ApiKey": ADMIN_API_KEY})
-    return response.json()
+    payload = response.json()
+    # Seq may return either a raw list or a wrapper object (e.g. {"Results": [...]}).
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        for candidate in ("Results", "Items", "ApiKeys"):
+            keys = payload.get(candidate)
+            if isinstance(keys, list):
+                return keys
+    return []
 
 def create_or_update_key(service, token):
     all_keys = get_all_keys()
     title = build_title(service)
-    existing_key = next((key for key in all_keys if key['Title'] == title), None)
+    existing_key = next(
+        (
+            key
+            for key in all_keys
+            if isinstance(key, dict) and key.get('Title') == title
+        ),
+        None
+    )
 
     app, pool = resolve_app_and_pool(service)
     applied_properties = [{"Name": "App", "Value": app}]
     if pool:
         applied_properties.append({"Name": "Pool", "Value": pool})
+    if CLUSTER_NAME:
+        applied_properties.append({"Name": "Cluster", "Value": CLUSTER_NAME})
     if CUSTOMER_NAME:
         applied_properties.append({"Name": "Customer", "Value": CUSTOMER_NAME})
 
@@ -78,7 +101,8 @@ def main():
     services = get_services()
     for service, token in services.items():
         result = create_or_update_key(service, token)
-        print(f"API Key for {service}: {result['TokenPrefix']}")
+        token_prefix = result.get('TokenPrefix') if isinstance(result, dict) else None
+        print(f"API Key for {service}: {token_prefix or '<unknown>'}")
 
 if __name__ == "__main__":
     main()
